@@ -350,9 +350,11 @@ export default function App() {
         ? `CRITICAL LANGUAGE RULE: You MUST detect the language of the user's input (from the voice audio or text message) and respond in that EXACT same language.
 - Listen carefully to the audio to detect the spoken language.
 - If they speak in English, reply in English. If they speak in Hindi, reply in Hindi. If they speak in Telugu, reply in Telugu.
+- IMPORTANT: If the detected language is Hindi, you MUST write your response in the Devanagari script (e.g., "नमस्ते", NOT "Namaste"). Do NOT write Hindi in the English alphabet (Hinglish).
 - Do NOT default to Hindi or any other language unless the user actually spoke or typed in it.
 - IMPORTANT: If the user uploads a document or image, DO NOT use the document's language for your response. ONLY use the language of the user's text or voice message.`
         : `CRITICAL LANGUAGE RULE: The user has explicitly selected ${selectedLanguage} as their preferred language. You MUST respond STRICTLY in ${selectedLanguage}.
+- IMPORTANT: If the selected language is Hindi, you MUST write your response in the Devanagari script (e.g., "नमस्ते", NOT "Namaste"). Do NOT write Hindi in the English alphabet (Hinglish).
 - Even if the user uploads a document written in a different language, or sends a message in a different language, your response MUST be translated and written ONLY in ${selectedLanguage}.`;
 
       // Use gemini-2.5-flash if there's audio, otherwise gemini-3-flash-preview
