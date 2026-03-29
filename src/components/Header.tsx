@@ -14,6 +14,7 @@ interface HeaderProps {
   user: User | null;
   setShowAuthModal: (show: boolean) => void;
   logout: () => void;
+  onFindCenter: () => void;
 }
 
 export default function Header({
@@ -27,7 +28,8 @@ export default function Header({
   isAuthReady,
   user,
   setShowAuthModal,
-  logout
+  logout,
+  onFindCenter
 }: HeaderProps) {
   return (
     <header className="bg-white border-b border-gray-100 px-4 py-3 shadow-sm z-10 flex justify-between items-center sticky top-0">
@@ -58,6 +60,14 @@ export default function Header({
       </div>
       
       <div className="flex items-center gap-4 sm:gap-6">
+        <button 
+          onClick={onFindCenter}
+          className="flex items-center gap-1 sm:gap-2 bg-[#00796b] hover:bg-teal-700 text-white px-2.5 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-colors shadow-sm"
+        >
+          <span className="text-sm sm:text-lg leading-none">📍</span> 
+          <span className="hidden sm:inline">Find MeeSeva Center</span>
+          <span className="sm:hidden">MeeSeva</span>
+        </button>
         <button 
           onClick={() => setCurrentView('about')}
           className="hidden sm:block text-gray-600 hover:text-[#00796b] font-medium text-sm"

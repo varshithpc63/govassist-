@@ -27,6 +27,7 @@ type Message = {
     data: string | null; // base64
     dataStripped?: boolean;
   }[];
+  mapLinks?: { title: string; uri: string }[];
 };
 
 type Chat = {
@@ -62,6 +63,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
+  const [location, setLocation] = useState<{latitude: number, longitude: number} | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -74,6 +76,22 @@ export default function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude
+          });
+        },
+        (error) => {
+          console.error("Error getting location:", error);
+        }
+      );
+    }
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -214,7 +232,7 @@ export default function App() {
     setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
-  const sendCoreMessage = async (newUserMsg: Message) => {
+  const sendCoreMessage = async (newUserMsg: Message, overrideLocation?: {latitude: number, longitude: number}) => {
     const detectedLang = selectedLanguage === 'Auto' ? detectLanguage(newUserMsg.text) : selectedLanguage;
 
     setMessages(prev => [...prev, newUserMsg]);
@@ -290,14 +308,10 @@ export default function App() {
 - EXTREMELY IMPORTANT: If the selected language is Hindi, you MUST write your response EXCLUSIVELY in the Devanagari script (e.g., "नमस्ते", NOT "Namaste"). You are FORBIDDEN from writing Hindi in the English alphabet (Hinglish).
 - Even if the user uploads a document written in a different language, or sends a message in a different language, your response MUST be translated and written ONLY in ${selectedLanguage}.`;
 
-      // Use gemini-2.5-flash if there's audio, otherwise gemini-3-flash-preview
-      const modelToUse = hasAudio ? 'gemini-2.5-flash' : 'gemini-3-flash-preview';
+      const modelToUse = 'gemini-3-flash-preview';
 
-      const response = await ai.models.generateContent({
-        model: modelToUse,
-        contents: contents,
-        config: {
-          systemInstruction: `You are GovAssist+, a very friendly and patient helper for common people and rural citizens in India. Your job is to help with government services (Aadhaar, PAN, Ration Card, Voter ID, etc.).
+      const config: any = {
+        systemInstruction: `You are GovAssist+, a very friendly and patient helper for common people and rural citizens in India. Your job is to help with government services (Aadhaar, PAN, Ration Card, Voter ID, etc.).
 
 Follow the workflow strictly step by step.
 
@@ -379,18 +393,84 @@ Rules:
 2. LANGUAGE: ${languageInstruction}
 3. BE HELPFUL & DIRECT: Answer their exact question immediately. Give step-by-step easy instructions.
 4. DOCUMENTS: If they upload a photo, tell them simply what it is and if it looks correct.
-5. STATE MANAGEMENT: Wait for user response at each step before moving to the next.`,
-          temperature: 0.7,
+5. STATE MANAGEMENT: Wait for user response at each step before moving to the next.
+6. FIND MEESEVA CENTERS: If the user asks to find nearby MeeSeva centers, you MUST use the provided location coordinates and the Google Maps tool to find the nearest centers. Do not ask for documents or explain processes in this case. Just provide the locations.`,
+        temperature: 0.7,
+      };
+
+      const isLocationQuery = newUserMsg.text.toLowerCase().includes('meeseva') || 
+                              newUserMsg.text.toLowerCase().includes('near') ||
+                              newUserMsg.text.toLowerCase().includes('location') ||
+                              overrideLocation !== undefined;
+
+      const activeLocation = overrideLocation || location;
+      if (activeLocation && isLocationQuery) {
+        config.tools = [{ googleMaps: {} }];
+        config.toolConfig = {
+          retrievalConfig: {
+            latLng: activeLocation
+          }
+        };
+        // Append location to the last user message
+        const lastUserMsgIndex = contents.map(c => c.role).lastIndexOf('user');
+        if (lastUserMsgIndex >= 0) {
+          contents[lastUserMsgIndex].parts.push({
+            text: `\n\nMy current location is latitude ${activeLocation.latitude}, longitude ${activeLocation.longitude}. Please find nearby MeeSeva centers or government service centers based on this location.`
+          });
         }
+      }
+
+      const response = await ai.models.generateContent({
+        model: modelToUse,
+        contents: contents,
+        config: config
       });
 
-      const modelText = response.text || "I'm sorry, I couldn't process that.";
+      let modelText = response.text || "";
       
+      const mapLinks: { title: string; uri: string }[] = [];
+      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      if (chunks) {
+        chunks.forEach((chunk: any) => {
+          if (chunk.maps?.uri) {
+            mapLinks.push({
+              title: chunk.maps.title || "View on Google Maps",
+              uri: chunk.maps.uri
+            });
+          } else if (chunk.web?.uri) {
+            mapLinks.push({
+              title: chunk.web.title || "View Source",
+              uri: chunk.web.uri
+            });
+          }
+        });
+      }
+
+      if (!modelText) {
+        const finishReason = response.candidates?.[0]?.finishReason;
+        if (finishReason === 'SAFETY') {
+          modelText = "I cannot answer that due to safety guidelines.";
+        } else if (mapLinks.length > 0) {
+          modelText = "Here are the nearest locations I found:";
+        } else if (response.functionCalls && response.functionCalls.length > 0) {
+          modelText = "I need to perform an action, but I cannot do that right now.";
+        } else {
+          const isLocationQuery = contents.some(c => c.parts.some(p => p.text?.includes("government service centers based on this location")));
+          if (isLocationQuery) {
+            modelText = "I couldn't find any MeeSeva centers near your current location. You might want to try searching for a specific city or area.";
+          } else {
+            modelText = "I'm sorry, I couldn't find any information about that.";
+          }
+          console.log("Empty response from Gemini:", JSON.stringify(response));
+        }
+      }
+
       const modelMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
         text: modelText,
-        cleanText: getCleanText(modelText)
+        cleanText: getCleanText(modelText),
+        mapLinks: mapLinks.length > 0 ? mapLinks : undefined
       };
       
       setMessages(prev => [...prev, modelMsg]);
@@ -692,6 +772,57 @@ Rules:
     }
   };
 
+  const handleFindCenter = () => {
+    setCurrentView('chat');
+    
+    if (!location) {
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const newLocation = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude
+            };
+            setLocation(newLocation);
+            
+            const newUserMsg: Message = {
+              id: Date.now().toString(),
+              role: 'user',
+              text: "Find nearby MeeSeva centers",
+            };
+            sendCoreMessage(newUserMsg, newLocation);
+          },
+          (error) => {
+            console.error("Error getting location:", error);
+            const errorMsg: Message = {
+              id: Date.now().toString(),
+              role: 'model',
+              text: "I need your location to find nearby MeeSeva centers. Please enable location permissions in your browser and try again.",
+              cleanText: "I need your location to find nearby MeeSeva centers. Please enable location permissions in your browser and try again."
+            };
+            setMessages(prev => [...prev, errorMsg]);
+          }
+        );
+      } else {
+        const errorMsg: Message = {
+          id: Date.now().toString(),
+          role: 'model',
+          text: "Geolocation is not supported by your browser.",
+          cleanText: "Geolocation is not supported by your browser."
+        };
+        setMessages(prev => [...prev, errorMsg]);
+      }
+      return;
+    }
+
+    const newUserMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: "Find nearby MeeSeva centers",
+    };
+    sendCoreMessage(newUserMsg);
+  };
+
   return (
     <div className="flex h-screen bg-white font-sans relative overflow-hidden">
       <React.Suspense fallback={null}>
@@ -723,6 +854,7 @@ Rules:
             user={user}
             setShowAuthModal={setShowAuthModal}
             logout={logout}
+            onFindCenter={handleFindCenter}
           />
         </React.Suspense>
 

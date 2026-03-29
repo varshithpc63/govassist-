@@ -14,6 +14,7 @@ interface Message {
   role: 'user' | 'model';
   cleanText?: string;
   attachments?: Attachment[];
+  mapLinks?: { title: string; uri: string }[];
 }
 
 interface MessageListProps {
@@ -72,6 +73,25 @@ export default function MessageList({
                 msg.text
               )}
             </div>
+
+            {msg.mapLinks && msg.mapLinks.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-sm font-semibold text-gray-700">📍 Sources & Locations:</p>
+                <div className="flex flex-col gap-2">
+                  {msg.mapLinks.map((link, idx) => (
+                    <a 
+                      key={idx} 
+                      href={link.uri} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 p-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm border border-blue-100"
+                    >
+                      <span className="truncate">{link.title}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <button 
               onClick={() => speakText(msg.text, msg.id, msg.cleanText)}
