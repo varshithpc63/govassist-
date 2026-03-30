@@ -504,16 +504,37 @@ Rules:
 3. BE HELPFUL & DIRECT: Answer their exact question immediately. Give step-by-step easy instructions.
 4. DOCUMENTS: If they upload a photo, tell them simply what it is and if it looks correct.
 5. STATE MANAGEMENT: Wait for user response at each step before moving to the next.
-6. FIND MEESEVA CENTERS: If the user asks to find nearby MeeSeva centers, DO NOT give a long explanation. Simply give a 1-sentence confirmation (e.g., "Here are the nearest MeeSeva centers based on your location. Please click the map link below to view them.") and nothing else.`,
+6. FIND MEESEVA CENTERS: If the user asks to find nearby MeeSeva centers, DO NOT give a long explanation. Simply give a 1-sentence confirmation (e.g., "Here are the nearest MeeSeva centers based on your location. Please click the map link below to view them.") and nothing else.
+7. PROACTIVE RECOMMENDATION: At the end of answering any general query about government services, processes, or documents, you MUST proactively ask the user: "Would you like me to find the nearest MeeSeva centers near you?"`,
         temperature: 0.7,
       };
 
-      const isLocationQuery = newUserMsg.text.toLowerCase().includes('meeseva') || 
-                              newUserMsg.text.toLowerCase().includes('near') ||
-                              newUserMsg.text.toLowerCase().includes('location') ||
+      const userTextLower = newUserMsg.text.toLowerCase();
+      const isLocationQuery = (userTextLower.includes('meeseva') && (userTextLower.includes('near') || userTextLower.includes('find') || userTextLower.includes('where') || userTextLower.includes('location'))) || 
+                              userTextLower.includes('nearest') ||
                               overrideLocation !== undefined;
 
-      const activeLocation = overrideLocation || location;
+      let activeLocation = overrideLocation || location;
+      
+      if (isLocationQuery && !activeLocation && 'geolocation' in navigator) {
+        try {
+          activeLocation = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              (position) => resolve({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude
+              }),
+              (error) => reject(error)
+            );
+          });
+          if (activeLocation) {
+            setLocation(activeLocation);
+          }
+        } catch (error) {
+          console.error("Error getting location automatically:", error);
+        }
+      }
+
       if (activeLocation && isLocationQuery) {
         // Append location to the last user message
         const lastUserMsgIndex = contents.map(c => c.role).lastIndexOf('user');
