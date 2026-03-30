@@ -24,9 +24,31 @@ export default function Profile({ user, onBack }: ProfileProps) {
         displayName: displayName.trim(),
         photoURL: photoURL.trim()
       });
+      
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db, handleFirestoreError, OperationType } = await import('../firebase');
+      const userRef = doc(db, 'users', user.uid);
+      try {
+        await setDoc(userRef, {
+          displayName: displayName.trim(),
+          photoURL: photoURL.trim()
+        }, { merge: true });
+      } catch (dbError) {
+        handleFirestoreError(dbError, OperationType.WRITE, `users/${user.uid}`);
+      }
+      
       setMessage({ type: 'success', text: 'Profile updated successfully!' });
     } catch (error: any) {
-      setMessage({ type: 'error', text: error.message || 'Failed to update profile' });
+      let errorText = error.message || 'Failed to update profile';
+      try {
+        const parsed = JSON.parse(errorText);
+        if (parsed.error) {
+          errorText = parsed.error;
+        }
+      } catch (e) {
+        // Not a JSON string
+      }
+      setMessage({ type: 'error', text: errorText });
     } finally {
       setIsLoading(false);
     }

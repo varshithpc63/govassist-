@@ -3,8 +3,9 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { Mic, MicOff, Send, Paperclip, Volume2, Square, Loader2, FileText, Image as ImageIcon, X, LogIn, LogOut, User as UserIcon, Plus, Languages, ChevronDown, Menu, ChevronLeft, MessageSquare, Trash2, MoreVertical, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
-import { auth, logout } from './firebase';
+import { auth, logout, db, handleFirestoreError, OperationType } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { collection, query, orderBy, onSnapshot, doc, setDoc, deleteDoc, getDocFromServer } from 'firebase/firestore';
 
 const Profile = React.lazy(() => import('./components/Profile'));
 const About = React.lazy(() => import('./components/About').then(module => ({ default: module.About })));
@@ -64,10 +65,15 @@ export default function App() {
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [location, setLocation] = useState<{latitude: number, longitude: number} | null>(null);
+  const [asyncError, setAsyncError] = useState<Error | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  if (asyncError) {
+    throw asyncError;
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -76,6 +82,19 @@ export default function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
+    }
+    testConnection();
+  }, []);
 
   useEffect(() => {
     if ('geolocation' in navigator) {
@@ -113,6 +132,39 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isAuthReady || !user) return;
+
+    const chatsRef = collection(db, 'users', user.uid, 'chats');
+    const q = query(chatsRef, orderBy('updatedAt', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedChats: Chat[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        try {
+          loadedChats.push({
+            id: data.id,
+            title: data.title,
+            messages: JSON.parse(data.messages),
+            updatedAt: data.updatedAt
+          });
+        } catch (e) {
+          console.error("Error parsing chat messages:", e);
+        }
+      });
+      setChats(loadedChats);
+    }, (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/chats`);
+      } catch (e) {
+        setAsyncError(e as Error);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user, isAuthReady]);
+
   // Pre-fetch voices for browser TTS fallback
   useEffect(() => {
     if ('speechSynthesis' in window) {
@@ -136,21 +188,58 @@ export default function App() {
     return 'English';
   };
 
-  const startNewChat = () => {
-    // Save current chat if it has messages
-    if (messages.length > 1) {
-      const chatId = currentChatId || Date.now().toString();
-      const title = messages.find(m => m.role === 'user')?.text.substring(0, 30) || "New Chat";
-      
+  const saveChatToFirestore = async (chatId: string, msgs: Message[]) => {
+    const title = msgs.find(m => m.role === 'user')?.text.substring(0, 30) || "New Chat";
+    
+    if (!user) {
       setChats(prev => {
         const existingIndex = prev.findIndex(c => c.id === chatId);
         if (existingIndex >= 0) {
           const updated = [...prev];
-          updated[existingIndex] = { ...updated[existingIndex], messages, updatedAt: Date.now() };
+          updated[existingIndex] = { ...updated[existingIndex], messages: msgs, updatedAt: Date.now() };
           return updated;
         }
-        return [{ id: chatId, title, messages, updatedAt: Date.now() }, ...prev];
+        return [{ id: chatId, title, messages: msgs, updatedAt: Date.now() }, ...prev];
       });
+      return;
+    }
+    
+    // Strip base64 data to save space before storing
+    const strippedMessages = msgs.map(msg => {
+      if (!msg.attachments) return msg;
+      return {
+        ...msg,
+        attachments: msg.attachments.map(att => ({
+          name: att.name,
+          type: att.type,
+          data: null, // Remove base64 data
+          dataStripped: true
+        }))
+      };
+    });
+
+    try {
+      const chatRef = doc(db, 'users', user.uid, 'chats', chatId);
+      await setDoc(chatRef, {
+        id: chatId,
+        title,
+        messages: JSON.stringify(strippedMessages),
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      try {
+        handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/chats/${chatId}`);
+      } catch (e) {
+        setAsyncError(e as Error);
+      }
+    }
+  };
+
+  const startNewChat = () => {
+    // Save current chat if it has messages
+    if (messages.length > 1) {
+      const chatId = currentChatId || Date.now().toString();
+      saveChatToFirestore(chatId, messages);
     }
     
     setCurrentChatId(null);
@@ -162,18 +251,7 @@ export default function App() {
     // Save current chat before switching
     if (messages.length > 1) {
       const currentId = currentChatId || Date.now().toString();
-      const title = messages.find(m => m.role === 'user')?.text.substring(0, 30) || "New Chat";
-      
-      setChats(prev => {
-        const existingIndex = prev.findIndex(c => c.id === currentId);
-        const newChat = { id: currentId, title, messages, updatedAt: Date.now() };
-        if (existingIndex >= 0) {
-          const updated = [...prev];
-          updated[existingIndex] = newChat;
-          return updated;
-        }
-        return [newChat, ...prev];
-      });
+      saveChatToFirestore(currentId, messages);
     }
 
     const chat = chats.find(c => c.id === chatId);
@@ -184,9 +262,22 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
-  const handleDeleteChat = (e: React.MouseEvent, chatId: string) => {
+  const handleDeleteChat = async (e: React.MouseEvent, chatId: string) => {
     e.stopPropagation();
-    setChats(prev => prev.filter(c => c.id !== chatId));
+    if (user) {
+      try {
+        await deleteDoc(doc(db, 'users', user.uid, 'chats', chatId));
+      } catch (error) {
+        try {
+          handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/chats/${chatId}`);
+        } catch (e) {
+          setAsyncError(e as Error);
+        }
+      }
+    } else {
+      setChats(prev => prev.filter(c => c.id !== chatId));
+    }
+    
     if (currentChatId === chatId) {
       setCurrentChatId(null);
       setMessages([INITIAL_MESSAGE]);
@@ -235,7 +326,16 @@ export default function App() {
   const sendCoreMessage = async (newUserMsg: Message, overrideLocation?: {latitude: number, longitude: number}) => {
     const detectedLang = selectedLanguage === 'Auto' ? detectLanguage(newUserMsg.text) : selectedLanguage;
 
-    setMessages(prev => [...prev, newUserMsg]);
+    let activeChatId = currentChatId;
+    if (!activeChatId) {
+      activeChatId = Date.now().toString();
+      setCurrentChatId(activeChatId);
+    }
+
+    const newMessages = [...messages, newUserMsg];
+    setMessages(newMessages);
+    saveChatToFirestore(activeChatId, newMessages);
+    
     setInput('');
     setAttachments([]);
     setIsTyping(true);
@@ -258,6 +358,8 @@ export default function App() {
                   data: att.data
                 }
               });
+            } else if (att.dataStripped) {
+              parts.push({ text: `[Attachment: ${att.name}]` });
             }
           });
         }
@@ -473,14 +575,19 @@ Rules:
         mapLinks: mapLinks.length > 0 ? mapLinks : undefined
       };
       
-      setMessages(prev => [...prev, modelMsg]);
+      const updatedMessages = [...newMessages, modelMsg];
+      setMessages(updatedMessages);
+      saveChatToFirestore(activeChatId, updatedMessages);
     } catch (error) {
       console.error("Gemini API Error:", error);
-      setMessages(prev => [...prev, {
+      const errorMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
         text: "⚠️ I encountered an error connecting to the server. Please try again."
-      }]);
+      };
+      const updatedMessages = [...newMessages, errorMsg];
+      setMessages(updatedMessages);
+      saveChatToFirestore(activeChatId, updatedMessages);
     } finally {
       setIsTyping(false);
     }

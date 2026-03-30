@@ -81,7 +81,11 @@ export const loginWithEmail = async (email: string, password: string) => {
         }, { merge: true });
       }
     } catch (dbError) {
-      handleFirestoreError(dbError, OperationType.WRITE, `users/${user.uid}`);
+      try {
+        handleFirestoreError(dbError, OperationType.WRITE, `users/${user.uid}`);
+      } catch (e) {
+        console.error("Failed to update user document on login:", e);
+      }
     }
     
     return user;
@@ -112,7 +116,11 @@ export const signUpWithEmail = async (email: string, password: string, displayNa
         lastLoginAt: serverTimestamp()
       });
     } catch (dbError) {
-      handleFirestoreError(dbError, OperationType.WRITE, `users/${user.uid}`);
+      try {
+        handleFirestoreError(dbError, OperationType.WRITE, `users/${user.uid}`);
+      } catch (e) {
+        console.error("Failed to create user document on signup:", e);
+      }
     }
     
     return user;

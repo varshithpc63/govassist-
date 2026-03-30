@@ -10,13 +10,21 @@ if (!apiKey) {
 const ai = new GoogleGenAI({ apiKey });
 
 async function testSearch() {
-  console.log("\nTesting Google Search...");
+  console.log("\nTesting Google Maps...");
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "My current location is latitude 17.3850, longitude 78.4867. Please find nearby MeeSeva centers based on this.",
+      contents: "Find nearby MeeSeva centers",
       config: {
-        tools: [{ googleSearch: {} }]
+        tools: [{ googleMaps: {} }],
+        toolConfig: {
+          retrievalConfig: {
+            latLng: {
+              latitude: 17.3850,
+              longitude: 78.4867
+            }
+          }
+        }
       }
     });
     console.log("Search TEXT:", response.text);

@@ -47,7 +47,16 @@ export default function AuthModal({ onClose }: AuthModalProps) {
       }
       onClose();
     } catch (err: any) {
-      const errorMessage = err.message || 'Authentication failed';
+      let errorMessage = err.message || 'Authentication failed';
+      try {
+        const parsed = JSON.parse(errorMessage);
+        if (parsed.error) {
+          errorMessage = parsed.error;
+        }
+      } catch (e) {
+        // Not a JSON string
+      }
+      
       let friendlyMessage = errorMessage;
       let field: 'mobile' | 'password' | 'general' = 'general';
 

@@ -16,6 +16,14 @@ service cloud.firestore {
     //   - createdAt: timestamp (required, immutable) - When the user account was created
     //   - lastLoginAt: timestamp (required) - When the user last logged in
     //
+    // Collection: users/{userId}/chats
+    // Document ID: {chatId}
+    // Fields:
+    //   - id: string (required, immutable) - The chat's unique ID
+    //   - title: string (required) - The chat's title
+    //   - messages: string (required) - JSON stringified array of messages
+    //   - updatedAt: number (required) - When the chat was last updated
+    //
     // ===============================================================
     
     // ===============================================================
@@ -66,6 +74,15 @@ service cloud.firestore {
              data.lastLoginAt is timestamp;
     }
 
+    function isValidChat(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'messages', 'updatedAt']) &&
+             hasRequiredFields(['id', 'title', 'messages', 'updatedAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() < 128 &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.messages is string && data.messages.size() < 1000000 &&
+             data.updatedAt is number;
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       
@@ -83,6 +100,22 @@ service cloud.firestore {
                        ((request.resource.data.role == resource.data.role) || isAdmin());
                        
       allow delete: if isAdmin();
+      
+      match /chats/{chatId} {
+        allow read: if isOwner(userId) || isAdmin();
+        
+        allow create: if isAuthenticated() && 
+                         isOwner(userId) && 
+                         isValidChat(request.resource.data) &&
+                         request.resource.data.id == chatId;
+                         
+        allow update: if isAuthenticated() && 
+                         isOwner(userId) && 
+                         isValidChat(request.resource.data) &&
+                         areImmutableFieldsUnchanged(['id']);
+                         
+        allow delete: if isOwner(userId) || isAdmin();
+      }
     }
   }
 }
