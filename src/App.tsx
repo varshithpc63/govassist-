@@ -324,8 +324,6 @@ export default function App() {
   };
 
   const sendCoreMessage = async (newUserMsg: Message, overrideLocation?: {latitude: number, longitude: number}) => {
-    const detectedLang = selectedLanguage === 'Auto' ? detectLanguage(newUserMsg.text) : selectedLanguage;
-
     let activeChatId = currentChatId;
     if (!activeChatId) {
       activeChatId = Date.now().toString();
@@ -399,15 +397,25 @@ export default function App() {
       
       contents.push({ role: 'user', parts: newUserParts });
 
+      const isVoiceMessage = hasAudio && (!newUserMsg.text || newUserMsg.text === '🎤 Voice Message');
+      const isFirstMessage = messages.length === 0;
+      
       const languageInstruction = selectedLanguage === 'Auto' 
-        ? `CRITICAL LANGUAGE RULE: You MUST detect the language of the user's input (from the voice audio or text message) and respond in that EXACT same language.
-- Listen carefully to the audio to detect the spoken language.
-- If they speak in English, reply in English. If they speak in Hindi, reply in Hindi. If they speak in Telugu, reply in Telugu.
-- EXTREMELY IMPORTANT: If the detected language is Hindi, you MUST write your response EXCLUSIVELY in the Devanagari script (e.g., "नमस्ते", NOT "Namaste"). You are FORBIDDEN from writing Hindi in the English alphabet (Hinglish).
-- Do NOT default to Hindi or any other language unless the user actually spoke or typed in it.
+        ? `CRITICAL LANGUAGE RULE: 
+${isVoiceMessage 
+  ? `- The user has sent a voice message. You MUST listen to the audio, detect the spoken language (English, Hindi, or Telugu), and respond in that EXACT same language. Do NOT default to Hindi if they speak English or Telugu.`
+  : `- You MUST detect the language of the user's text input and respond in that EXACT same language.
+- If the user types in English (e.g., 'Find nearby MeeSeva centers'), you MUST reply in English.
+- If the user types in Telugu (or Telugu in English script), you MUST reply in Telugu.
+- If the user types in Hindi (or Hindi in English script), you MUST reply in Hindi.
+- Do NOT default to Hindi unless the user actually typed in Hindi.
+${isFirstMessage ? '' : `- Since this is an ongoing conversation, maintain the language established in the previous messages. Even if the user sends a short English phrase like 'Find nearby MeeSeva centers', reply in the main language of the conversation.`}`}
+- EXTREMELY IMPORTANT: If the language is Hindi, you MUST write your response EXCLUSIVELY in the Devanagari script (e.g., "नमस्ते", NOT "Namaste"). You are FORBIDDEN from writing Hindi in the English alphabet (Hinglish).
+- EXTREMELY IMPORTANT: If the language is Telugu, you MUST write your response EXCLUSIVELY in the Telugu script (e.g., "నమస్కారం"). You are FORBIDDEN from writing Telugu in the English alphabet (Tenglish).
 - IMPORTANT: If the user uploads a document or image, DO NOT use the document's language for your response. ONLY use the language of the user's text or voice message.`
         : `CRITICAL LANGUAGE RULE: The user has explicitly selected ${selectedLanguage} as their preferred language. You MUST respond STRICTLY in ${selectedLanguage}.
 - EXTREMELY IMPORTANT: If the selected language is Hindi, you MUST write your response EXCLUSIVELY in the Devanagari script (e.g., "नमस्ते", NOT "Namaste"). You are FORBIDDEN from writing Hindi in the English alphabet (Hinglish).
+- EXTREMELY IMPORTANT: If the selected language is Telugu, you MUST write your response EXCLUSIVELY in the Telugu script (e.g., "నమస్కారం"). You are FORBIDDEN from writing Telugu in the English alphabet (Tenglish).
 - Even if the user uploads a document written in a different language, or sends a message in a different language, your response MUST be translated and written ONLY in ${selectedLanguage}.`;
 
       const modelToUse = 'gemini-3.1-flash-lite-preview';
@@ -496,7 +504,7 @@ Rules:
 3. BE HELPFUL & DIRECT: Answer their exact question immediately. Give step-by-step easy instructions.
 4. DOCUMENTS: If they upload a photo, tell them simply what it is and if it looks correct.
 5. STATE MANAGEMENT: Wait for user response at each step before moving to the next.
-6. FIND MEESEVA CENTERS: If the user asks to find nearby MeeSeva centers, you MUST use the provided location coordinates and the Google Maps tool to find the nearest centers. Do not ask for documents or explain processes in this case. Just provide the locations.`,
+6. FIND MEESEVA CENTERS: If the user asks to find nearby MeeSeva centers, DO NOT give a long explanation. Simply give a 1-sentence confirmation (e.g., "Here are the nearest MeeSeva centers based on your location. Please click the map link below to view them.") and nothing else.`,
         temperature: 0.7,
       };
 
@@ -510,8 +518,12 @@ Rules:
         // Append location to the last user message
         const lastUserMsgIndex = contents.map(c => c.role).lastIndexOf('user');
         if (lastUserMsgIndex >= 0) {
+          const langAppend = (isFirstMessage && selectedLanguage === 'Auto') 
+            ? " Since this is the first message of the conversation and the request is in English, you MUST reply in English." 
+            : " You MUST reply in the exact same language that we have been using in this conversation.";
+            
           contents[lastUserMsgIndex].parts.push({
-            text: `\n\nMy current location is latitude ${activeLocation.latitude}, longitude ${activeLocation.longitude}. Please tell me how to find nearby MeeSeva centers or government service centers. Provide a helpful response.`
+            text: `\n\nMy current location is latitude ${activeLocation.latitude}, longitude ${activeLocation.longitude}. I want to find nearby MeeSeva centers. Please give a very short 1-sentence reply telling me to click the Google Maps link below. DO NOT give any long explanations or lists.${langAppend}`
           });
         }
       }
