@@ -394,7 +394,7 @@ Rules:
 3. BE HELPFUL & DIRECT: Answer their exact question immediately. Give step-by-step easy instructions.
 4. DOCUMENTS: If they upload a photo, tell them simply what it is and if it looks correct.
 5. STATE MANAGEMENT: Wait for user response at each step before moving to the next.
-6. FIND MEESEVA CENTERS: If the user asks to find nearby MeeSeva centers, you MUST use the provided location coordinates and the Google Search tool to find the nearest centers. Do not ask for documents or explain processes in this case. Just provide the locations.`,
+6. FIND MEESEVA CENTERS: If the user asks to find nearby MeeSeva centers, you MUST use the provided location coordinates and the Google Maps tool to find the nearest centers. Do not ask for documents or explain processes in this case. Just provide the locations.`,
         temperature: 0.7,
       };
 
@@ -405,18 +405,22 @@ Rules:
 
       const activeLocation = overrideLocation || location;
       if (activeLocation && isLocationQuery) {
-        config.tools = [{ googleSearch: {} }];
+        config.tools = [{ googleMaps: {} }];
+        config.toolConfig = {
+          retrievalConfig: {
+            latLng: activeLocation
+          }
+        };
         // Append location to the last user message
         const lastUserMsgIndex = contents.map(c => c.role).lastIndexOf('user');
         if (lastUserMsgIndex >= 0) {
           contents[lastUserMsgIndex].parts.push({
-            text: `\n\nMy current location is latitude ${activeLocation.latitude}, longitude ${activeLocation.longitude}. Please find nearby MeeSeva centers or government service centers based on this location. Provide their names and addresses.`
+            text: `\n\nMy current location is latitude ${activeLocation.latitude}, longitude ${activeLocation.longitude}. Please find nearby MeeSeva centers or government service centers based on this location.`
           });
         }
       }
 
-      const aiInstance = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await aiInstance.models.generateContent({
+      const response = await ai.models.generateContent({
         model: modelToUse,
         contents: contents,
         config: config
@@ -451,7 +455,7 @@ Rules:
         } else if (response.functionCalls && response.functionCalls.length > 0) {
           modelText = "I need to perform an action, but I cannot do that right now.";
         } else {
-          const isLocationQuery = contents.some(c => c.parts.some(p => p.text?.includes("Provide their names and addresses.")));
+          const isLocationQuery = contents.some(c => c.parts.some(p => p.text?.includes("government service centers based on this location")));
           if (isLocationQuery) {
             modelText = "I couldn't find any MeeSeva centers near your current location. You might want to try searching for a specific city or area.";
           } else {
