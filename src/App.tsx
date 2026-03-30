@@ -410,7 +410,7 @@ export default function App() {
 - EXTREMELY IMPORTANT: If the selected language is Hindi, you MUST write your response EXCLUSIVELY in the Devanagari script (e.g., "नमस्ते", NOT "Namaste"). You are FORBIDDEN from writing Hindi in the English alphabet (Hinglish).
 - Even if the user uploads a document written in a different language, or sends a message in a different language, your response MUST be translated and written ONLY in ${selectedLanguage}.`;
 
-      const modelToUse = 'gemini-3-flash-preview';
+      const modelToUse = 'gemini-3.1-flash-lite-preview';
 
       const config: any = {
         systemInstruction: `You are GovAssist+, a very friendly and patient helper for common people and rural citizens in India. Your job is to help with government services (Aadhaar, PAN, Ration Card, Voter ID, etc.).
@@ -507,17 +507,11 @@ Rules:
 
       const activeLocation = overrideLocation || location;
       if (activeLocation && isLocationQuery) {
-        config.tools = [{ googleMaps: {} }];
-        config.toolConfig = {
-          retrievalConfig: {
-            latLng: activeLocation
-          }
-        };
         // Append location to the last user message
         const lastUserMsgIndex = contents.map(c => c.role).lastIndexOf('user');
         if (lastUserMsgIndex >= 0) {
           contents[lastUserMsgIndex].parts.push({
-            text: `\n\nMy current location is latitude ${activeLocation.latitude}, longitude ${activeLocation.longitude}. Please find nearby MeeSeva centers or government service centers based on this location.`
+            text: `\n\nMy current location is latitude ${activeLocation.latitude}, longitude ${activeLocation.longitude}. Please tell me how to find nearby MeeSeva centers or government service centers. Provide a helpful response.`
           });
         }
       }
@@ -531,6 +525,15 @@ Rules:
       let modelText = response.text || "";
       
       const mapLinks: { title: string; uri: string }[] = [];
+      
+      // Manually add a Google Maps link if it was a location query
+      if (activeLocation && isLocationQuery) {
+        mapLinks.push({
+          title: "Search MeeSeva Centers on Google Maps",
+          uri: `https://www.google.com/maps/search/MeeSeva+centers+near+me/@${activeLocation.latitude},${activeLocation.longitude},14z`
+        });
+      }
+      
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
       if (chunks) {
         chunks.forEach((chunk: any) => {
